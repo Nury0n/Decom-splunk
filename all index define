@@ -1,0 +1,30 @@
+La méthode la plus complète passe par l'API REST, qui liste tous les index existants même s'ils sont vides :
+
+spl
+| rest /services/data/indexes
+| table title, datatype, currentDBSizeMB, maxTotalDataSizeMB, totalEventCount, frozenTimePeriodInSecs, disabled
+| rename title AS index
+| sort index
+
+Si tu es en environnement distribué et que tu veux interroger les indexeurs plutôt que le search head, ajoute splunk_server=* et dédoublonne :
+
+spl
+| rest /services/data/indexes splunk_server=*
+| stats max(currentDBSizeMB) AS taille_MB, sum(totalEventCount) AS nb_events BY title
+| rename title AS index
+| sort index
+
+Alternative rapide avec eventcount, qui renvoie aussi le nombre d'événements par index :
+
+spl
+| eventcount summarize=false index=* index=_*
+| dedup index
+| table index
+
+Pour ne voir que les index qui ont reçu des données sur la période choisie :
+
+spl
+| tstats count WHERE index=* OR index=_* BY index
+| sort - count
+
+Une précision : toutes ces requêtes ne montrent que les index auxquels ton rôle a accès. Si un index attendu n'apparaît pas, c'est souvent une question de droits (paramètre srchIndexesAllowed du rôle) plutôt qu'un index inexistant.
