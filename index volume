@@ -35,3 +35,60 @@ spl
 | addcoltotals labelfield=index label="TOTAL" disque_GB
 
 J'ai mis 3 décimales pour que les petits index n'apparaissent pas à 0 ; remplace le 3 par 2 dans round() si tu préfères un affichage plus compact.
+
+
+1. Lister les hosts présents dans un index :
+
+spl
+| tstats count, max(_time) AS dernier_event WHERE index="mon_index" BY host
+| convert ctime(dernier_event)
+| sort - count
+
+Alternative équivalente avec metadata :
+
+spl
+| metadata type=hosts index="mon_index"
+| convert ctime(firstTime) ctime(lastTime) ctime(recentTime)
+| table host, totalCount, firstTime, lastTime
+| sort - totalCount
+
+2. Volumétrie par host pour cet index, en filtrant sur les hosts voulus
+
+Via les logs de licence (le champ h contient le host) :
+
+spl
+index=_internal source=*license_usage.log* type=Usage idx="mon_index" h IN ("host1", "host2", "host3")
+| stats sum(b) AS bytes BY idx, h
+| eval volume_GB=round(bytes/1024/1024/1024, 3)
+| rename idx AS index, h AS host
+| table index, host, volume_GB
+| sort - volume_GB
+| addcoltotals labelfield=host label="TOTAL" volume_GB
+
+Version combinée avec le nombre d'événements par host :
+
+spl
+| tstats count WHERE index="mon_index" host IN ("host1", "host2", "host3") BY index, host
+| join type=left index, host
+    [ search index=_internal source=*license_usage.log* type=Usage idx="mon_index" h IN ("host1", "host2", "host3")
+      | stats sum(b) AS bytes BY idx, h
+      | rename idx AS index, h AS host ]
+| eval volume_GB=round(coalesce(bytes,0)/1024/1024/1024, 3)
+| table index, host, count, volume_GB
+| sort - volume_GB
+| addcoltotals labelfield=host label="TOTAL" count, volume_GB
+
+Tu peux utiliser des jokers dans la liste, par exemple h IN ("srv-web*", "srv-db01").
+
+Point d'attention important : Splunk applique un « squashing » dans le license_usage.log quand il y a trop de combinaisons host/source distinctes. Dans ce cas, les champs h et s sont vidés et seul l'index est conservé, donc une partie du volume peut ne pas être attribuée à un host. Si tu constates des lignes avec h vide ou un total par host inférieur au total de l'index, utilise cette méthode de secours, exacte mais plus lente car elle lit les événements bruts :
+
+spl
+index="mon_index" host IN ("host1", "host2", "host3")
+| eval taille=len(_raw)
+| stats count, sum(taille) AS bytes BY index, host
+| eval volume_GB=round(bytes/1024/1024/1024, 3)
+| table index, host, count, volume_GB
+| sort - volume_GB
+| addcoltotals labelfield=host label="TOTAL" count, volume_GB
+
+Enfin, dbinspect ne permet pas de ventiler la taille disque par host, puisqu'il raisonne par bucket ; la volumétrie par host se fait donc forcément sur le volume ingéré.
