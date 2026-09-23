@@ -24,7 +24,7 @@ spl
 Si tu veux une ligne par host avec la liste de ses fichiers regroupés :
 
 spl
-| tstats count WHERE (index="unix_security" OR index="windows_security") BY index, host, source
+| tstats count WHERE (index="aws_alert" OR index="dc_security" OR index="aws_activity" OR index="firewall" OR index="endpoint_security" OR index="mail" OR index="mail_ext" OR index="aws_traffic" OR index="windows_security") BY index, host, source
 | stats dc(source) AS nb_sources, values(source) AS sources, sum(count) AS nb_events BY index, host
 | sort index, host
 
