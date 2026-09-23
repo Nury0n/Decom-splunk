@@ -1,0 +1,41 @@
+tstats count ne donne que des nombres d'événements, pas de taille. Pour obtenir une volumétrie en Mo, il faut s'appuyer sur une autre source, et le choix dépend de ce que tu veux mesurer.
+
+Volume ingéré (brut, avant compression) via les logs de licence, sur la plage de temps choisie :
+
+spl
+index=_internal source=*license_usage.log* type=Usage
+| stats sum(b) AS bytes BY idx
+| eval volume_MB=round(bytes/1024/1024, 2)
+| rename idx AS index
+| table index, volume_MB
+| sort - volume_MB
+| addcoltotals labelfield=index label="TOTAL" volume_MB
+
+Version combinée avec ta requête (nombre d'événements + volume par index, et total en bas) :
+
+spl
+| tstats count WHERE index=* OR index=_* BY index
+| join type=left index
+    [ search index=_internal source=*license_usage.log* type=Usage
+      | stats sum(b) AS bytes BY idx
+      | rename idx AS index ]
+| eval volume_MB=round(coalesce(bytes,0)/1024/1024, 2)
+| table index, count, volume_MB
+| sort - count
+| addcoltotals labelfield=index label="TOTAL" count, volume_MB
+
+Taille réellement occupée sur disque (après compression, tous buckets confondus, indépendamment de la plage de temps) :
+
+spl
+| dbinspect index=* index=_*
+| stats sum(sizeOnDiskMB) AS disque_MB BY index
+| eval disque_MB=round(disque_MB, 2)
+| sort - disque_MB
+| addcoltotals labelfield=index label="TOTAL" disque_MB
+
+Quelques points à garder en tête. Le license_usage.log n'existe que sur le license manager, donc il faut que ton search head y ait accès (ou que ses _internal soient forwardés). Les index internes (_internal, _audit, etc.) ne sont pas décomptés dans la licence, ils apparaîtront donc à 0 Mo dans les deux premières requêtes ; utilise dbinspect si tu veux leur taille. Enfin, le volume disque est typiquement bien inférieur au volume ingéré, car Splunk compresse les données brutes (souvent un facteur de l'ordre de 2 à 3 selon les données, index compris).
+
+
+
+
+Claude est une IA et peut commettre des erreurs. Veuillez vérifier les réponses.
