@@ -1,8 +1,22 @@
 Voici la requête la plus efficace, avec tstats (elle lit uniquement les métadonnées d'index, donc c'est très rapide même sur de gros volumes) :
 
+Voici les index qui sont utiliser par la Sécu : 
+
+aws_alert         
+dc_security      
+aws_activity     
+firewall          
+endpoint_security 
+mail              
+mail_ext
+aws_traffic    
+windows_security 
+
+#index="aws_alert" OR index="dc_security" OR index="aws_activity" OR index="firewall" OR index="endpoint_security" OR index="mail" OR index="mail_ext" OR index="aws_traffic" OR index="windows_security" 
+
 spl
 | tstats count AS nb_events, min(_time) AS premier_event, max(_time) AS dernier_event
-  WHERE (index="unix_security" OR index="windows_security")
+  WHERE (index="aws_alert" OR index="dc_security" OR index="aws_activity" OR index="firewall" OR index="endpoint_security" OR index="mail" OR index="mail_ext" OR index="aws_traffic" OR index="windows_security")
   BY index, host, source
 | convert ctime(premier_event) ctime(dernier_event)
 | sort index, host, source
