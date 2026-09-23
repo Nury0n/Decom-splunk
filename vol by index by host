@@ -1,0 +1,55 @@
+basé sur cette requete : 
+
+| tstats count AS nb_events, min(_time) AS premier_event, max(_time) AS dernier_event
+  WHERE (index="uatm" OR index="uatr" OR   index="uatj" OR  index="uati")
+  BY index, host, source
+| convert ctime(premier_event) ctime(dernier_event)
+| sort index, host, source
+
+je veux classer les fichiers indexé par host et par index de puis il me faut le calcul de la volumetrie en GB
+
+Voici ta requête enrichie avec la volumétrie ingérée par fichier, récupérée depuis les logs de licence (champs idx, h et s) :
+
+spl
+| tstats count AS nb_events, min(_time) AS premier_event, max(_time) AS dernier_event
+  WHERE index IN ("uatm", "uatr", "uatj", "uati")
+  BY index, host, source
+| join type=left index, host, source
+    [ search index=_internal source=*license_usage.log* type=Usage idx IN ("uatm", "uatr", "uatj", "uati")
+      | stats sum(b) AS bytes BY idx, h, s
+      | rename idx AS index, h AS host, s AS source ]
+| eval volume_GB=round(coalesce(bytes,0)/1024/1024/1024, 3)
+| eventstats sum(volume_GB) AS total_host_GB BY index, host
+| eventstats sum(volume_GB) AS total_index_GB BY index
+| convert ctime(premier_event) ctime(dernier_event)
+| table index, total_index_GB, host, total_host_GB, source, nb_events, volume_GB, premier_event, dernier_event
+| sort index, host, source
+| addcoltotals labelfield=index label="TOTAL" nb_events, volume_GB
+Chaque ligne correspond à un fichier, avec son volume, et les colonnes total_host_GB et total_index_GB donnent les sous-totaux par host et par index. La dernière ligne donne le total général.
+
+Si tu préfères une vue synthétique avec les fichiers regroupés par host :
+
+spl
+| tstats count AS nb_events WHERE index IN ("uatm", "uatr", "uatj", "uati") BY index, host, source
+| join type=left index, host, source
+    [ search index=_internal source=*license_usage.log* type=Usage idx IN ("uatm", "uatr", "uatj", "uati")
+      | stats sum(b) AS bytes BY idx, h, s
+      | rename idx AS index, h AS host, s AS source ]
+| eval volume_GB=round(coalesce(bytes,0)/1024/1024/1024, 3)
+| stats values(source) AS fichiers, dc(source) AS nb_fichiers, sum(nb_events) AS nb_events, sum(volume_GB) AS volume_GB BY index, host
+| sort index, - volume_GB
+| addcoltotals labelfield=index label="TOTAL" nb_fichiers, nb_events, volume_GB
+Le même avertissement sur le squashing s'applique, et il est encore plus probable ici puisqu'on descend au niveau du fichier : si des fichiers apparaissent à 0 GB alors qu'ils ont des événements, c'est que le license_usage.log a perdu le détail host/source. Dans ce cas, cette version calcule la taille directement à partir des événements, exacte mais plus lente :
+
+spl
+index IN ("uatm", "uatr", "uatj", "uati")
+| eval taille=len(_raw)
+| stats count AS nb_events, sum(taille) AS bytes, min(_time) AS premier_event, max(_time) AS dernier_event BY index, host, source
+| eval volume_GB=round(bytes/1024/1024/1024, 3)
+| eventstats sum(volume_GB) AS total_host_GB BY index, host
+| eventstats sum(volume_GB) AS total_index_GB BY index
+| convert ctime(premier_event) ctime(dernier_event)
+| table index, total_index_GB, host, total_host_GB, source, nb_events, volume_GB, premier_event, dernier_event
+| sort index, host, source
+| addcoltotals labelfield=index label="TOTAL" nb_events, volume_GB
+Sur une longue plage de temps, lance plutôt cette dernière sur une période réduite (par exemple 24 h ou 7 jours) pour éviter une recherche trop lourde.
