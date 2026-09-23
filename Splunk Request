@@ -1,0 +1,21 @@
+Voici la requête la plus efficace, avec tstats (elle lit uniquement les métadonnées d'index, donc c'est très rapide même sur de gros volumes) :
+
+spl
+| tstats count AS nb_events, min(_time) AS premier_event, max(_time) AS dernier_event
+  WHERE (index="unix_security" OR index="windows_security")
+  BY index, host, source
+| convert ctime(premier_event) ctime(dernier_event)
+| sort index, host, source
+
+Si tu veux une ligne par host avec la liste de ses fichiers regroupés :
+
+spl
+| tstats count WHERE (index="unix_security" OR index="windows_security") BY index, host, source
+| stats dc(source) AS nb_sources, values(source) AS sources, sum(count) AS nb_events BY index, host
+| sort index, host
+
+Et pour ajouter le sourcetype (utile pour vérifier que chaque fichier est bien parsé comme prévu), remplace BY index, host, source par BY index, host, source, sourcetype.
+
+Deux remarques pratiques. Pense à régler la plage de temps du sélecteur (par exemple « All time » ou les 30 derniers jours), car tstats la respecte comme une recherche classique. 
+Côté windows_security, le champ source ne contiendra généralement pas de chemins de fichiers mais des valeurs comme WinEventLog:Security ou XmlWinEventLog:Security, puisque 
+les événements viennent des journaux d'événements Windows et non de fichiers plats ; c'est normal.
