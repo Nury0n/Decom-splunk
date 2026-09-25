@@ -1,0 +1,194 @@
+=> #/etc/rsyslog.conf
+
+# rsyslog v5 configuration file
+#
+# MODIFICATION : une seule, l'inclusion de /etc/rsyslog.d/*.conf a été
+# déplacée dans la section RULES, juste après le bloc RemoteHost (voir "AJOUT").
+# Tout le reste est la configuration d'origine.
+
+# For more information see /usr/share/doc/rsyslog-*/rsyslog_conf.html
+# If you experience problems, see http://www.rsyslog.com/doc/troubleshoot.html
+
+#### MODULES ####
+
+$ModLoad imuxsock # provides support for local system logging (e.g. via logger command)
+$ModLoad imklog   # provides kernel logging support (previously done by rklogd)
+#$ModLoad immark  # provides --MARK-- message capability
+
+# Provides UDP syslog reception
+$ModLoad imudp
+$UDPServerRun 514
+
+# Provides TCP syslog reception
+#$ModLoad imtcp
+#$InputTCPServerRun 514
+
+#### GLOBAL DIRECTIVES ####
+
+# Use default timestamp format
+$ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat
+
+$template 3PARFormat,"%timegenerated% %FROMHOST% %syslogtag%%msg%\n"
+
+# File syncing capability is disabled by default. This feature is usually not required,
+# not useful and an extreme performance hit
+#$ActionFileEnableSync on
+
+# Include all config files in /etc/rsyslog.d/
+# (laissé commenté ici : l'inclusion est faite plus bas, dans RULES)
+#$IncludeConfig /etc/rsyslog.d/*.conf
+
+# Turn off message reception via local log socket;
+# local messages are retrieved through imjournal now.
+#$OmitLocalLogging on
+
+# File to store the position in the journal
+#$IMJournalStateFile imjournal.state
+
+#### RULES ####
+#$template RemoteHost, "/var/log/remote/%FROMHOST%/%PROGRAMNAME%.log"
+$template RemoteHost, "/var/log/remote/%FROMHOST%.log"
+if ($hostname != 'ehlp12fr') then  ?RemoteHost;3PARFormat
+& ~
+
+# --- ADD : inclusion des règles locales ---
+# Placée ICI volontairement :
+#  - APRÈS le bloc RemoteHost : les messages des machines distantes sont déjà
+#    traités et jetés, ils n'arrivent pas dans les fichiers d'une minute ;
+#  - AVANT les règles /var/log/* : les "& ~" de sudo et audit agissent avant
+#    que ces messages n'atterrissent dans /var/log/messages.
+$IncludeConfig /etc/rsyslog.d/*.conf
+# --- FIN ADD ---
+
+
+# Log all kernel messages to the console.
+# Logging much else clutters up the screen.
+#kern.*                                                 /dev/console
+
+# Log anything (except mail) of level info or higher.
+# Don't log private authentication messages!
+*.info;mail.none;authpriv.none;cron.none                /var/log/messages
+
+# The authpriv file has restricted access.
+authpriv.*                                              /var/log/secure
+
+# Log all the mail messages in one place.
+mail.*                                                  -/var/log/maillog
+
+
+# Log cron stuff
+cron.*                                                  /var/log/cron
+
+# Everybody gets emergency messages
+#*.emerg                                                 *
+*.emerg                                                 :omusrmsg:*
+
+# Save news errors of level crit and higher in a special file.
+uucp,news.crit                                          /var/log/spooler
+
+# Save boot messages also to boot.log
+local7.*                                                /var/log/boot.log
+
+
+# ### begin forwarding rule ###
+# The statement between the begin ... end define a SINGLE forwarding
+# rule. They belong together, do NOT split them. If you create multiple
+# forwarding rules, duplicate the whole block!
+# Remote Logging (we use TCP for reliable delivery)
+#
+# An on-disk queue is created for this action. If the remote host is
+# down, messages are spooled to disk and sent when it is up again.
+#$WorkDirectory /var/lib/rsyslog # where to place spool files
+#$ActionQueueFileName fwdRule1 # unique name prefix for spool files
+#$ActionQueueMaxDiskSpace 1g   # 1gb space limit (use as much as possible)
+#$ActionQueueSaveOnShutdown on # save messages to disk on shutdown
+#$ActionQueueType LinkedList   # run asynchronously
+#$ActionResumeRetryCount -1    # infinite retries if host is down
+# remote host is: name/ip:port, e.g. 192.168.0.1:514, port optional
+#*.* @@remote-host:514
+# ### end of the forwarding rule ###
+
+
+=> /etc/rsyslog.d/00-rsyslogtest-common.conf
+
+# /etc/rsyslog.d/00-rsyslogtest-common.conf
+# Éléments communs aux fichiers d'une minute : module, état, templates, droits.
+# Les fichiers de ce répertoire sont lus par ordre alphabétique : celui-ci en premier.
+# Défini les templates que l'on va appliquer
+
+#Charge le module de lecture de fichiers
+$ModLoad imfile
+
+# Defini l'endroit des temps
+$WorkDirectory /var/lib/rsyslog
+
+$template Sudo1min,"/work/rsyslogtest/sudo/%HOSTNAME%_sudo_%timegenerated:::date-year%%timegenerated:::date-month%%timegenerated:::date-day%%timegenerated:::date-hour%%timegenerated:::date-minute%.log"
+$template Audit1min,"/work/rsyslogtest/audit/%HOSTNAME%_audit_%timegenerated:::date-year%%timegenerated:::date-month%%timegenerated:::date-day%%timegenerated:::date-hour%%timegenerated:::date-minute%.log"
+$template Secure1min,"/work/rsyslogtest/secure/%HOSTNAME%_secure_%timegenerated:::date-year%%timegenerated:::date-month%%timegenerated:::date-day%%timegenerated:::date-hour%%timegenerated:::date-minute%.log"
+$template Messages1min,"/work/rsyslogtest/messages/%HOSTNAME%_messages_%timegenerated:::date-year%%timegenerated:::date-month%%timegenerated:::date-day%%timegenerated:::date-hour%%timegenerated:::date-minute%.log"
+
+# Droits des fichiers créés (secure/audit/sudo sont sensibles)
+$CreateDirs on
+$DirCreateMode 0750
+$FileCreateMode 0640
+
+=> #/etc/rsyslog.d/10-rsyslogtest-sudo.conf
+
+# /etc/rsyslog.d/10-rsyslogtest-sudo.conf
+# sudo.log est écrit par sudo (pas par rsyslog) -> lecture imfile sans risque de boucle.
+
+$InputFileName /var/adm/sudo.log
+$InputFileTag sudo:
+$InputFileStateFile state-sudo
+$InputFileSeverity info
+$InputFileFacility local1
+$InputRunFileMonitor
+
+# Écriture puis suppression du flux (évite le doublon dans /var/log/messages)
+:syslogtag, isequal, "sudo:"                    ?Sudo1min
+& ~
+
+=> #/etc/rsyslog.d/20-rsyslogtest-audit.conf
+
+# /etc/rsyslog.d/20-rsyslogtest-audit.conf
+# audit.log est écrit par auditd (pas par rsyslog) -> lecture imfile sans risque de boucle.
+# Facility local6 : vérifier qu'elle n'est pas déjà utilisée (grep -r local6 /etc/rsyslog*).
+
+$InputFileName /var/log/audit/audit.log
+$InputFileTag audit:
+$InputFileStateFile state-audit
+$InputFileSeverity info
+$InputFileFacility local2
+$InputRunFileMonitor
+
+# Écriture puis suppression du flux : l'audit est très volumineux,
+# il ne doit surtout pas partir dans /var/log/messages.
+:syslogtag, isequal, "audit:"                   ?Audit1min
+& ~
+
+=> /etc/rsyslog.d/30-rsyslogtest-secure.conf
+
+# /etc/rsyslog.d/30-rsyslogtest-secure.conf
+# /var/log/secure est écrit par rsyslog lui-même -> PAS d'imfile (risque de boucle/doublon).
+# On duplique le flux avec le même sélecteur que la règle /var/log/secure.
+# Pas de "& ~" : le message continue et va aussi dans /var/log/secure.
+
+authpriv.*                                      ?Secure1min
+
+=> /etc/rsyslog.d/40-rsyslogtest-messages.conf
+
+# /etc/rsyslog.d/40-rsyslogtest-messages.conf
+# /var/log/messages est écrit par rsyslog lui-même -> PAS d'imfile (c'était la cause de la boucle).
+# On duplique le flux avec le même sélecteur que la règle /var/log/messages.
+# Pas de "& ~" : le message continue et va aussi dans /var/log/messages.
+
+*.info;mail.none;authpriv.none;cron.none        ?Messages1min
+
+=> /etc/rsyslog.d/99-rsyslogtest-reset.conf
+
+# /etc/rsyslog.d/99-rsyslogtest-reset.conf
+# Les directives "$..." restent actives pour la suite de rsyslog.conf :
+# on remet les valeurs par défaut avant les règles /var/log/* d'origine.
+
+$DirCreateMode 0700
+$FileCreateMode 0644
