@@ -43,27 +43,24 @@ $ActionResumeRetryCount -1
 
 local3,local4,local5,local6.* @@<IP_agregateur>:514
 
-Une facility local3–local6 distincte par fichier, pour pouvoir les distinguer et les router séparément côté agrégateur si besoin (avec le template %HOSTNAME%/%PROGRAMNAME%.log déjà en place dans le doc, vous obtiendrez /var/log/remote/ehlp0mfr/sudo.log, .../audit.log, etc.).
+Une facility local3–local6 distincte par fichier, pour pouvoir les distinguer et les router séparément côté agrégateur si besoin (avec le template %HOSTNAME%/%PROGRAMNAME%.log déjà en place dans le doc, 
+vous obtiendrez /var/log/remote/ehlp0mfr/sudo.log, .../audit.log, etc.).
 
 Deux points à vérifier avant de déployer, propres à ces fichiers-là :
-
-Permissions. audit.log et secure sont généralement en 600 root:root — si votre rsyslog abandonne ses privilèges vers un utilisateur non-root ($PrivDropToUser, comme sur Debian/Ubuntu), il ne pourra pas les lire. Sur RHEL/CentOS, le paquet rsyslog tourne en général en root par défaut (pas de drop de privilège dans sa conf standard), donc souvent ça passe tout seul — mais vérifiez avec ps aux | grep rsyslogd ou systemctl show rsyslog -p User, et testez la lecture explicitement.
-
-SELinux. Si SELinux est en enforcing (probable sur ce type de host durci vu les chemins), la lecture d'audit.log par le domaine syslogd_t peut être bloquée par la politique même si les permissions Unix sont bonnes. Si imfile ne remonte rien pour ce fichier précis alors que les autres fonctionnent, vérifiez ausearch -m avc -ts recent pour un éventuel refus AVC.
+Permissions. audit.log et secure sont généralement en 600 root:root — si votre rsyslog abandonne ses privilèges vers un utilisateur non-root ($PrivDropToUser, comme sur Debian/Ubuntu), il ne pourra pas les lire.
+Sur RHEL/CentOS, le paquet rsyslog tourne en général en root par défaut (pas de drop de privilège dans sa conf standard), donc souvent ça passe tout seul — mais vérifiez avec ps aux | grep rsyslogd ou systemctl show rsyslog -p User, et testez la lecture explicitement.
+SELinux. Si SELinux est en enforcing (probable sur ce type de host durci vu les chemins), la lecture d'audit.log par le domaine syslogd_t peut être bloquée par la politique même si les permissions Unix sont bonnes. 
+Si imfile ne remonte rien pour ce fichier précis alors que les autres fonctionnent, vérifiez ausearch -m avc -ts recent pour un éventuel refus AVC.
 
 est ce que je dois updater directement le fichier rsyslog.conf ou est ce que je dois faire un fichier a part
 
 Un fichier à part, dans /etc/rsyslog.d/ — c'est exactement pour ça que ce répertoire existe, et c'est la ligne $IncludeConfig /etc/rsyslog.d/*.conf qu'on a vue dans /etc/rsyslog.conf qui le charge automatiquement.
-
 Trois raisons concrètes d'éviter de toucher rsyslog.conf directement :
-
 Vous ne touchez à rien de ce qui fonctionne déjà (50-default.conf et les règles locales messages/secure) — zéro risque de casser la journalisation existante par une faute de frappe au milieu d'un fichier système.
-
 Une mise à jour du paquet rsyslog peut écraser /etc/rsyslog.conf ou proposer de fusionner vos changements (prompt dpkg/rpm) si vous l'avez modifié — un fichier séparé dans rsyslog.d/ n'est jamais touché par le paquet.
-
 C'est plus lisible et plus facile à retirer : toute votre config Splunk-vers-agrégateur tient dans un seul fichier identifiable, que vous pouvez déployer, versionner (Ansible, Git) ou supprimer d'un coup sans toucher au reste.
-
-Convention à respecter : les fichiers de rsyslog.d/ se chargent dans l'ordre alphabétique, donc préfixez par un numéro pour contrôler où votre règle s'insère par rapport aux autres — 50-default.conf charge déjà les règles locales, donc un numéro supérieur (ex. 60-) garantit que votre bloc s'applique après, sans risquer qu'une règle avec un stop plus haut dans l'ordre n'empêche vos messages d'arriver jusqu'à votre action :
+Convention à respecter : les fichiers de rsyslog.d/ se chargent dans l'ordre alphabétique, donc préfixez par un numéro pour contrôler où votre règle s'insère par rapport aux autres — 50-default.conf charge déjà les règles locales,
+donc un numéro supérieur (ex. 60-) garantit que votre bloc s'applique après, sans risquer qu'une règle avec un stop plus haut dans l'ordre n'empêche vos messages d'arriver jusqu'à votre action :
 
 bash
 sudo nano /etc/rsyslog.d/60-splunk-to-aggregator.conf
@@ -127,7 +124,8 @@ sudo rsyslogd -N1 -f /etc/rsyslog.d/60-splunk-test-local.conf
 sudo systemctl restart rsyslog
 ls -la /data/rsyslog-test/
 
-Pour générer du contenu de test sans attendre un vrai événement : sudo whoami alimente sudo.log/audit.log/secure, une simple commande logger "test" alimente généralement messages. Vérifiez que chaque fichier attendu (sudo.log, audit.log, messages.log, secure.log) apparaît bien dans /data/rsyslog-test/ avec le bon contenu et le bon tag.
+Pour générer du contenu de test sans attendre un vrai événement : sudo whoami alimente sudo.log/audit.log/secure, une simple commande logger "test" alimente généralement messages. 
+Vérifiez que chaque fichier attendu (sudo.log, audit.log, messages.log, secure.log) apparaît bien dans /data/rsyslog-test/ avec le bon contenu et le bon tag.
 
 Étape 2 — une fois validé, ajouter le forward
 
@@ -140,6 +138,33 @@ $ActionResumeRetryCount -1
 
 local3,local4,local5,local6.* @@<IP_agregateur>:514
 
-Gardez les deux actions (locale + forward) tant que vous voulez une preuve tangible en local de ce qui part réellement vers l'agrégateur ; retirez l'action locale ensuite si vous n'en avez plus besoin en routine, pour ne pas dupliquer inutilement l'écriture disque.
+Gardez les deux actions (locale + forward) tant que vous voulez une preuve tangible en local de ce qui part réellement vers l'agrégateur ; 
+retirez l'action locale ensuite si vous n'en avez plus besoin en routine, pour ne pas dupliquer inutilement l'écriture disque.
+
+##### MON test local fichier ######
+
+$WorkDirectory /var/lib/rsyslog
+$ModLoad imfile
+
+$InputFileName /var/log/messages
+$InputFileTag messages:
+$InputFileStateFile state-messages
+$InputFileSeverity info
+$InputFileFacility local5
+$InputRunFileMonitor
+
+$InputFileName /var/adm/sudo.log
+$InputFileTag sudo:
+$InputFileStateFile state-sudo
+$InputFileSeverity info
+$InputFileFacility local3
+$InputRunFileMonitor
+
+template(name="TestLocal" type="string" string="/work/rsyslogtest/%PROGRAMNAME%/%HOSTNAME%_%PROGRAMNAME%_%timegenerated:::date-year%%timegenerated:::date-month%%timegenerated:::date-day%%timegenerated:::date-hour%%timegenerated:::date-minute%.log")
+local5,local3.* action(type="omfile" dynaFile="TestLocal")
+
+Filesystem                      Size  Used Avail Use% Mounted on
+/dev/mapper/vgsys-lvsys_varlog   18G  4.4G   12G  27% /var/log
+
 
 
